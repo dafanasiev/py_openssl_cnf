@@ -4,4 +4,4 @@ Parse `openssl.cnf` file into [AST](https://en.wikipedia.org/wiki/Abstract_synta
 Next you can modify AST and save it (with all spaces, newlines, comments, sections, etc.).
 
 # Sample
-See [sample.py](sample.py)
+See [add_gost](add_gost)

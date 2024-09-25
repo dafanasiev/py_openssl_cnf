@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+import argparse
+import pprint
+from parser import Comment, OpensslCnf, Str, Section, KVP
+
+########################################
+## Appends gost engine to openssl.cnf ##
+########################################
+
+###
+# parse openssl.cnf file into AST
+parser = argparse.ArgumentParser(description='Appends gost engine to openssl.cnf')
+parser.add_argument('--in', '-i', required=False, type=str, help='openssl.cnf income filename', default='/etc/ssl/openssl.cnf')
+parser.add_argument('--out', '-o', required=False, type=str, help='openssl.cnf output filename', default='/dev/stdout')
+parser.add_argument('--engine', '-e', required=False, type=str, help='gost.so full filename', default='/usr/lib/x86_64-linux-gnu/engines-3/gost.so')
+known_args, _ = parser.parse_known_args()
+
+ast = OpensslCnf.load(getattr(known_args, 'in'))
+
+###
+# find `openssl_conf` key value (reference to named section) from AST root
+openssl_conf_section_ref = ast.get_kvp('openssl_conf')
+if not openssl_conf_section_ref:
+    # prepend KVP to AST root if not exists
+    openssl_conf_section_ref = KVP('openssl_conf', '', '', 'openssl_init')
+    ast.prepend(Str('\n'))
+    ast.prepend(openssl_conf_section_ref)
+
+###
+# get `openssl_conf` related section by key value
+openssl_conf_section = ast.get_section(openssl_conf_section_ref.value)
+if openssl_conf_section:
+    engines_sect_ref = openssl_conf_section.get_kvp('engines')
+else:
+    # append section if not exists
+    openssl_conf_section = Section('', openssl_conf_section_ref.value, '')
+    ast.append(Str('\n'))
+    ast.append(openssl_conf_section)
+    ast.append(Str('\n'))
+    engines_sect_ref = None
+   
+
+###
+# get `engines_sect` section ref
+if engines_sect_ref:
+    engines_sect = ast.get_section(engines_sect_ref.value)
+else:
+    engines_sect_ref = KVP('engines', '', '', 'engine_sect')
+    openssl_conf_section.prepend(Str('\n'))
+    openssl_conf_section.prepend(engines_sect_ref)
+    openssl_conf_section.prepend(Str('\n'))
+    openssl_conf_section.prepend(Comment(' Engine section reference'))
+    openssl_conf_section.prepend(Str('\n'))
+    engines_sect = None
+
+###
+# append `engines_sect` if not exists
+if not engines_sect:
+    engines_sect = Section('', engines_sect_ref.value, '')
+    ast.append(Str('\n'))
+    ast.append(engines_sect)
+    ast.append(Str('\n'))
+
+###
+# find section where engine_id == gost
+gost_sect = None
+for engines_sect_kvp in engines_sect.kvp:
+    posibble_gost_section = ast.get_section(engines_sect_kvp.value)
+    engine_id = posibble_gost_section.get_kvp('engine_id')
+    if engine_id and engine_id.value == 'gost':
+        gost_sect = posibble_gost_section
+        break
+
+###
+# append `gost_sect` if not exists
+if not gost_sect:
+    gost_section_ref = KVP('gost', '', '', 'gost_sect')
+    engines_sect.append(Str('\n'))
+    engines_sect.append(gost_section_ref)
+    engines_sect.append(Str('\n'))
+
+    gost_sect = Section('', gost_section_ref.value, '')
+    ast.append(Str('\n'))
+    ast.append(gost_sect)
+    ast.append(Str('\n'))
+
+###
+# fill `gost_sect` keys with values if not exists
+if not gost_sect.get_kvp('engine_id'):
+    gost_sect.append(Str('\n'))
+    gost_sect.append(KVP('engine_id', '', '', 'gost'))
+    gost_sect.append(Str('\n'))
+
+if not gost_sect.get_kvp('dynamic_path'):
+    gost_sect.append(Str('\n'))
+    gost_sect.append(KVP('dynamic_path', '', '', known_args.engine))
+    gost_sect.append(Str('\n'))
+
+if not gost_sect.get_kvp('default_algorithms'):
+    gost_sect.append(Str('\n'))
+    gost_sect.append(KVP('default_algorithms', '', '', 'ALL'))
+    gost_sect.append(Str('\n'))
+
+if not gost_sect.get_kvp('CRYPT_PARAMS'):
+    gost_sect.append(Str('\n'))
+    gost_sect.append(KVP('CRYPT_PARAMS', '', '', 'id-Gost28147-89-CryptoPro-A-ParamSet'))
+    gost_sect.append(Str('\n'))
+
+###
+# ensure that AST ends with newline
+ast.ensure_last_new_line()
+
+# print modified AST
+pprint.pprint(ast)
+
+# save AST to file
+ast.dump(known_args.out)
